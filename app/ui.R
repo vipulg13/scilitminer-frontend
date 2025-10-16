@@ -1,6 +1,6 @@
 library(shiny)
 
-timeoutSeconds <- 300
+timeoutSeconds <- 1800
 inactivity <- sprintf("function idleTimer() {
   var t = setTimeout(logout, %s);
   window.onmousemove = resetTimer; // catches mouse movements
@@ -46,6 +46,7 @@ ui <- fluidPage(
         if ($('.tab-pane.active').attr('data-value') === 'login_element') {
           // Check if the Enter key (key code 13) was pressed
           if (e.which === 13) {
+            e.preventDefault(); // Prevent default form submission
             // Trigger the click event on the login button
             $('#cust_id-login_button').click();
           }
@@ -159,11 +160,11 @@ ui <- fluidPage(
                          style = "margin-top: -16px;")
                      ),
                    img(src = "scilitminer-logo.png", 
-                       height = 54, 
-                       width = 54, 
+                       height = 52, 
+                       width = 52, 
                        class = "pull-left"),
                    span("Scientific Literature Mining Platform",
-                   style = "padding-left:10px;transition:translateY(-50%);font-family:'Audiowide',sans-serif;font-size:1.6em;text-transform:uppercase;letter-spacing:0.1px;background:linear-gradient(#020202,#848484,#020202);-webkit-background-clip:text;color:transparent;")
+                   style = "padding-left:5px;transition:translateY(-50%);font-family:'Audiowide',sans-serif;font-size:1.6em;text-transform:uppercase;letter-spacing:0px;background:linear-gradient(#020202,#848484,#020202);-webkit-background-clip:text;color:transparent;")
                ),
                windowTitle = "SciLitMiner"
     ),

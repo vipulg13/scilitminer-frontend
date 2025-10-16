@@ -1,3 +1,7 @@
+######################################
+######## Author: Vipul Gupta #########
+######################################
+
 library(jsonlite)
 library(httr)
 library(shinyjs)
@@ -8,6 +12,173 @@ library(shinyWidgets)
 library(shiny.reglog)
 library(mongolite)
 library(emayili)
+library(shinycssloaders) # 1.1.0
+#library(reactR)
+#library(reactwidgets)
+library(shinyAce)
+library(rclipboard)
+
+rdf_tree <- list(
+  "experiment" = list(
+    "material_composition" = list(
+      "composition" = NA,
+      "measurement_unit" = c("atomicPercent", "weightPercent")
+    ),
+    "test_condition" = list("environment" = c("air", "vacuum", "gas")),
+    "microstructure" = list(
+      "type" = c("near-alpha", "near-gamma", "duplex", "lamellar", "near-lamellar", "fully-lamellar", "equiaxed", "bi-modal"),
+      "phase" = c("alpha", "alpha-2", "beta-0", "beta", "omega-0")
+    ),
+    "stress" = list("quantity" = NA, "stress_orientation" = c("tensile", "compression")),
+    "creep_rate" = list("quantity" = NA, "type" = c("primary", "secondary", "tertiary")),
+    "temperature" = list("quantity" = NA),
+    "materials_production" = list("process" = c("casting", "powder_metallurgy", "forging"))
+  )
+)
+
+# Function to transform schema into rdf_tree format
+create_rdf_tree <- function(schema_data) {
+  rdf_tree <- list(experiment = list())
+  for (element in schema_data) {
+    if (!is.null(element)) {
+      element_name <- element$name
+      rdf_tree$experiment[[element_name]] <- list()
+      for (child in element$children) {
+        if (!child$type == "Removed") {
+          if (child$type == "BaseQuantity") {
+            rdf_tree$experiment[[element_name]] <- list(quantity = NA)
+          } else if (child$type == "Enumerate" && nzchar(child$enum_values)) {
+            rdf_tree$experiment[[element_name]][[child$name]] <- unlist(strsplit(child$enum_values, ","))
+          } else if (child$type == "Quantity") {
+            rdf_tree$experiment[[element_name]][[child$name]] <- "quantity"
+          } else if (child$type == "OpenAttribute") {
+            rdf_tree$experiment[[element_name]][[child$name]] <- NA
+          }
+        }
+      }
+    }
+  }
+  return(rdf_tree)
+}
+
+create_rdf_tree <- function(schema_data) {
+  rdf_tree <- list(experiment = list())
+  
+  for (element in schema_data) {
+    if (!is.null(element)) {
+      element_name <- element$name
+      children_list <- list()
+      
+      for (child in element$children) {
+        if (!child$type == "Removed") {
+          if (child$type == "BaseQuantity") {
+            children_list$quantity <- NA
+          } else if (child$type == "Enumerate" && nzchar(child$enum_values)) {
+            children_list[[child$name]] <- unlist(strsplit(child$enum_values, ","))
+          } else if (child$type == "Quantity") {
+            children_list[[child$name]] <- "quantity"
+          } else if (child$type == "OpenAttribute") {
+            children_list[[child$name]] <- NA
+          }
+        }
+      }
+      
+      rdf_tree$experiment[[element_name]] <- children_list
+    }
+  }
+  
+  return(rdf_tree)
+}
+
+
+# dt_tree <- data.frame(parent = c("materials_composition", "materials_composition", "materials_composition",
+#                                  "test_condition", "test_condition", "test_condition",
+#                                  "microstructure", "microstructure", "microstructure", "microstructure", "microstructure", "microstructure", "microstructure",
+#                                  "microstructure", "microstructure", "microstructure", "microstructure", "microstructure",
+#                                  "stress", "stress", "stress",
+#                                  "creep_rate", "creep_rate", "creep_rate", "creep_rate",
+#                                  "temperature",
+#                                  "materials_production", "materials_production", "materials_production"
+# ),
+# value1 = c("composition", "measurement_unit", "measurement_unit",
+#            "environment", "environment", "environment",
+#            "type", "type", "type", "type", "type", "type", "type",
+#            "phase", "phase", "phase", "phase", "phase",
+#            "quantity", "stress_orientation", "stress_orientation",
+#            "quantity", "type", "type", "type",
+#            "quantity",
+#            "process", "process", "process"
+# ),
+# value2 = c(NA, "atomicPercent", "weightPercent",
+#            "air", "vaccum", "gas",
+#            "near-alpha", "near-gamma", "duplex", "nearly_lamellar", "fully_lamellar", "equiaxed", "bi-modal",
+#            "alpha", "alpha_2", "beta_0", "beta", "omega_0",
+#            NA, "tensile", "compression",
+#            NA, "primary", "secondary", "tertiary",
+#            NA,
+#            "casting", "powder_metallurgy", "forging")
+# )
+# 
+transform_rdf_to_df <- function(rdf_tree) {
+  rows <- list()  # Use a list to accumulate rows for performance
+
+  # Recursive helper function to process each node
+  process_node <- function(node, parent_name) {
+    for (key in names(node)) {
+      values <- node[[key]]
+
+      if (is.vector(values) && !is.list(values)) {
+        # If it's a vector, add each element to value2
+        for (value in values) {
+          rows <<- append(rows, list(data.frame(parent = parent_name, value1 = key, value2 = value, stringsAsFactors = FALSE)))
+        }
+      } else if (is.list(values)) {
+        # If it's a list, recurse into it
+        process_node(values, key)
+      } else {
+        # For scalar values (NA), add a single row
+        rows <<- append(rows, list(data.frame(parent = parent_name, value1 = key, value2 = NA, stringsAsFactors = FALSE)))
+      }
+    }
+  }
+
+  # Start processing from the root of the tree
+  process_node(rdf_tree, NULL)
+
+  # Combine rows into a single data frame
+  return(do.call(rbind, rows))
+}
+
+ 
+# # Transform the rdf_tree into the desired data.frame
+# dt_tree <- transform_rdf_to_df(rdf_tree$experiment)
+# 
+# # Create the data frame
+# tree <- create_tree(dt_tree)
+# 
+# rdf_tree_json <- toJSON(tree, auto_unbox = T)
+# write(rdf_tree_json, file = "c:/Users/guptav/ode_tree.json")
+
+#tree <- read_json("c:/Users/guptav/creep.json")
+#tree <- read_json(Sys.getenv("ODE_TREE_PATH"))
+
+# Function to prepare options for the dual list box
+prepareDualListBoxOptions_cust <- function(tree) {
+  lstOptions <- list()
+  for (category in names(tree)) {
+    if (is.list(tree[[category]])) {
+      for (sub_category in names(tree[[category]])) {
+        lstOptions[[sub_category]] <- tree[[category]][[sub_category]]
+      }
+    } else {
+      lstOptions[[category]] <- tree[[category]]
+    }
+  }
+  return(lstOptions)
+}
+
+# Prepare options for the dual list box from the rdf_tree
+#dual_list_options <- prepareDualListBoxOptions_cust(rdf_tree)
 
 
 server <- function(input, output, session){
@@ -27,10 +198,23 @@ server <- function(input, output, session){
           img_elem.setAttribute("src", src_value);
         }'
   
-  # Global variables
+  # Global/ reactivevariables
   searchRes <- reactiveValues(dt = NULL)
   pgLoadJS <- reactiveVal(paste0('setTimeout(function() {table.page(', 0 ,').draw(false);}, 10);'))
   insertCnt <- reactiveVal() #reactive search box
+  irscrv <- reactiveValues(ir_subcoll_names = NULL)
+  tqaTableVisible <- reactiveVal(FALSE)
+  selected_mmqa_indices <- reactiveVal(integer(0))
+  max_mmqa_selection <- 10
+  mmqa_data_raw <- reactiveVal(NULL)
+  current_mmqa_ir_subcoll <- reactiveVal(NULL)
+  selected_ode_indices <- reactiveVal(integer(0))
+  max_ode_selection <- 1
+  ode_data_raw <- reactiveVal(NULL)
+  current_ode_ir_subcoll <- reactiveVal(NULL)
+  de_schema_names <- reactiveVal(NULL)
+  de_schema_element_data <- reactiveValues()
+  de_schema_element_counter <- reactiveVal()
   
   # User authentication/registration
   dbConnector <- RegLogMongoConnector$new(
@@ -139,15 +323,23 @@ server <- function(input, output, session){
       
       # Dumping elements and variables before logging out
       searchRes <- reactiveValues(dt = NULL)
+      mmqa_data_raw(NULL)
       insertCnt(NULL)
+      de_schema_element_data <<- reactiveValues()
+      de_schema_element_counter(NULL)
+      current_mmqa_ir_subcoll(NULL)
+      ode_data_raw(NULL)
+      current_ode_ir_subcoll(NULL)
+      de_schema_names(NULL)
       RegLog$logout()
       if (!is.null(input$tabs)) {
         removeTab("tabs", "home")
         removeTab("tabs", "Literature Collection")
         removeTab("tabs", "Literature Selection")
-        removeTab("tabs", "Mining")
+        removeTab("tabs", "Knowledge Reasoning")
+        removeTab("tabs", "Data Extraction")
         #removeTab("tabs", "Analytics")
-        #removeTab("tabs", "User Profile")
+        removeTab("tabs", "User Profile")
         removeTab("tabs", "about")
         removeTab("tabs", "logout")
       }
@@ -170,6 +362,10 @@ server <- function(input, output, session){
         )
       })
       output$searchResult <- NULL
+    } else if (input$tabs == "vec_search") {
+      updateTextInput(session, "vecQuery", value = "")
+      updateSliderInput(session, "similarity_threshold", value = 0.65)
+      output$searchVecResult <- NULL
     } else if (input$tabs == "home") {
       
       # Showing home page
@@ -357,6 +553,19 @@ server <- function(input, output, session){
                           escape = F)
         }
       })
+    } else if (input$tabs == "tqa") {
+      output$tqaResponseUI <- renderUI({
+        NULL
+      })
+    } else if (input$tabs == "demo") {
+      updateTabsetPanel(session, inputId = "extraction", selected = "ode")
+      output$odeResponseUI <- renderUI({
+        NULL
+      })
+    } else if (input$tabs == "mmqa") {
+      output$mmqaResponseUI <- renderUI({
+        NULL
+      })
     } else if (input$tabs == "about") {
       disable("submitContactForm")
     } else if (input$tabs == "apiKeyMgmt") {
@@ -388,6 +597,10 @@ server <- function(input, output, session){
           updateTextInput(session, "elsevier_api_key", value = dt$elsevier_api_key)
           updateTextInput(session, "springer_api_key", value = dt$springer_api_key)
           updateTextInput(session, "wiley_api_key", value = dt$wiley_api_key)
+          updateTextInput(session, "blablador_api_key", value = dt$blablador_api_key)
+          updateTextInput(session, "azure_openai_api_key", value = dt$azure_openai_api_key)
+          updateTextInput(session, "azure_openai_api_endpoint", value = dt$azure_openai_api_endpoint)
+          updateTextInput(session, "azure_openai_api_version", value = dt$azure_openai_api_version)
         }
       } else {
         data.table(api_keys = c(""))
@@ -424,35 +637,35 @@ server <- function(input, output, session){
         }
       })
       
-      # ir sub collection names
-      ir_subcoll_names <- reactive({
-        tryCatch({
-          resp <- httr::GET(lstRESTRoutes$GET_IR_SUBCOLL_INFO)
-        }, warning = function(w) {
-          showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
-                           type = "warning",
-                           duration = 7)
-          removeModal()
-        }, error = function(e) {
-          showNotification(paste("The following error occurred while establishing a connection to the server:", e),
-                           type = "error",
-                           duration = 7)
-          removeModal()
-        })
-        if (exists("resp")) {
-          if (resp$status_code != 200) {
-            showNotification("The IR Sub-collection names couldn't be retrieved",
-                             duration = 7,
-                             action = a(href = "javascript:location.reload();", "Reload page"))
-            data.table(domain_name=c(), mining_opts=c())
-          } else {
-            content <- httr::content(resp)
-            data.table::rbindlist(content)
-          }
-        } else {
-          data.table(subcoll=c(""), description=c(""))
-        }
-      })
+      # # ir sub collection names
+      # ir_subcoll_names <- reactive({
+      #   tryCatch({
+      #     resp <- httr::GET(lstRESTRoutes$GET_IR_SUBCOLL_INFO)
+      #   }, warning = function(w) {
+      #     showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+      #                      type = "warning",
+      #                      duration = 7)
+      #     removeModal()
+      #   }, error = function(e) {
+      #     showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+      #                      type = "error",
+      #                      duration = 7)
+      #     removeModal()
+      #   })
+      #   if (exists("resp")) {
+      #     if (resp$status_code != 200) {
+      #       showNotification("The IR Sub-collection names couldn't be retrieved",
+      #                        duration = 7,
+      #                        action = a(href = "javascript:location.reload();", "Reload page"))
+      #       data.table(domain_name=c(), mining_opts=c())
+      #     } else {
+      #       content <- httr::content(resp)
+      #       data.table::rbindlist(content)
+      #     }
+      #   } else {
+      #     data.table(subcoll=c(""), description=c(""))
+      #   }
+      # })
       
       # Setup Mining UI
       output$mineUI <- renderUI({
@@ -467,7 +680,7 @@ server <- function(input, output, session){
                                      height = "80px")),
             column(12, selectInput(inputId = "ir_subcoll", 
                                    label = "Select a Sub-Collection", 
-                                   choices = ir_subcoll_names()$`_id`,
+                                   choices = irscrv$ir_subcoll_names$`_id`,
                                    width = "70%")),
             column(12, selectInput(inputId = "domain", 
                                    label = "Select a Domain", 
@@ -619,48 +832,56 @@ server <- function(input, output, session){
       
       # Evaluate Mining UI
       output$evalMineUI <- renderUI({
-        fluidRow(
-          column(12, selectInput(inputId = "eval_mine_job_name", 
-                                 label = "Select a Mining Job", 
-                                 choices = success_mine_job_names(),
-                                 width = "50%")),
-          column(12, actionButton("loadMineResults",
-                                  "Load Mining Results",
-                                  icon = icon("download", verify_fa = FALSE),
-                                  style = "bordered; white-space:normal",
-                                  width = "50%")),
-          #column(12, br()),
-          column(12, hr(style = "border-top: 1px solid #D3D3D3;")),
-          column(12, h5(HTML("<b>Evaluation Modes</b>"))),
-          disabled(column(3, actionButton("textMiningEval", 
-                                          "Text", 
-                                          icon = icon("file-alt", verify_fa = FALSE), 
-                                          style = "bordered; white-space:normal",
-                                          width = "70%"))),
-          disabled(column(3, actionButton("plotMiningEval", 
-                                          "Plot", 
-                                          icon = icon("chart-line", verify_fa = FALSE), 
-                                          style = "bordered; white-space:normal",
-                                          width = "70%"))),
-          disabled(column(3, actionButton("tableMiningEval", 
-                                          "Table", 
-                                          icon = icon("table", verify_fa = FALSE), 
-                                          style = "bordered; white-space:normal",
-                                          width = "70%"))),
-          column(12, hr(style = "border-top: 1px solid #D3D3D3;")),
-          #column(12, br()),
-          column(12, h5(HTML("<b>Navigate Documents</b>"))),
-          disabled(column(4, actionButton("previousDoc", 
-                                          "", 
-                                          icon = icon("arrow-left", verify_fa = FALSE), 
-                                          style = "bordered; white-space:normal",
-                                          width = "100%"))),
-          disabled(column(4, actionButton("nextDoc", 
-                                          "", 
-                                          icon = icon("arrow-right", verify_fa = FALSE), 
-                                          style = "bordered; white-space:normal",
-                                          width = "100%"))),
-          column(4)
+        tagList(
+          fluidRow(
+            column(12, selectInput(inputId = "eval_mine_job_name", 
+                                   label = "Select a Mining Job", 
+                                   choices = success_mine_job_names(),
+                                   width = "50%")),
+            column(12, actionButton("loadMineResults",
+                                    "Load Mining Results",
+                                    icon = icon("download", verify_fa = FALSE),
+                                    style = "bordered; white-space:normal",
+                                    width = "50%")),
+            #column(12, br()),
+            column(12, hr(style = "border-top: 1px solid #D3D3D3;")),
+            column(12, h5(HTML("<b>Evaluation Modes</b>"))),
+            disabled(column(3, actionButton("textMiningEval", 
+                                            "Text", 
+                                            icon = icon("file-alt", verify_fa = FALSE), 
+                                            style = "bordered; white-space:normal",
+                                            width = "70%"))),
+            disabled(column(3, actionButton("plotMiningEval", 
+                                            "Plot", 
+                                            icon = icon("chart-line", verify_fa = FALSE), 
+                                            style = "bordered; white-space:normal",
+                                            width = "70%"))),
+            disabled(column(3, actionButton("tableMiningEval", 
+                                            "Table", 
+                                            icon = icon("table", verify_fa = FALSE), 
+                                            style = "bordered; white-space:normal",
+                                            width = "70%"))),
+            column(12, hr(style = "border-top: 1px solid #D3D3D3;")),
+            #column(12, br()),
+            column(12, h5(HTML("<b>Navigate Documents</b>"))),
+            disabled(column(4, actionButton("previousDoc", 
+                                            "", 
+                                            icon = icon("arrow-left", verify_fa = FALSE), 
+                                            style = "bordered; white-space:normal",
+                                            width = "100%"))),
+            disabled(column(4, actionButton("nextDoc", 
+                                            "", 
+                                            icon = icon("arrow-right", verify_fa = FALSE), 
+                                            style = "bordered; white-space:normal",
+                                            width = "100%"))),
+            column(4)
+          ),
+          showModal(modalDialog(
+            title = "Note",
+            paste("This feature is still under development and/or testing. Stay tuned!"),
+            footer = NULL,
+            easyClose = TRUE
+          )) 
         )
       })
     }
@@ -684,7 +905,14 @@ server <- function(input, output, session){
                             GET_API_KEYS = paste0(server_name, "getAPIKeys"),
                             GET_SYNONYMS = paste0(server_name, "getSynonyms"),
                             POST_SYNONYMS = paste0(server_name, "postSynonyms"),
-                            GET_SYNONYM_DOMAIN_NAMES = paste0(server_name, "getSynonymDomainNames")
+                            GET_SYNONYM_DOMAIN_NAMES = paste0(server_name, "getSynonymDomainNames"),
+                            POST_TQA = paste0(server_name, "postTQARequest"),
+                            GET_MMQADATASET = paste0(server_name, "getMMQADataset"),
+                            POST_MMQA = paste0(server_name, "postMMQARequest"),
+                            GET_ODEDATASET = paste0(server_name, "getODEDataset"),
+                            GET_DE_SCHEMA_NAMES = paste0(server_name, "getDESchemaNames"),
+                            POST_DE_SCHEMA_NAME = paste0(server_name, "postDESchemaName"),
+                            POST_ODE = paste0(server_name, "postODERequest")
       )
       
       #Crete Collection: Job form validation
@@ -729,6 +957,36 @@ server <- function(input, output, session){
         )
       })
       
+      # ir sub collection names
+      tryCatch({
+        resp <- httr::GET(lstRESTRoutes$GET_IR_SUBCOLL_INFO)
+      }, warning = function(w) {
+        showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                         type = "warning",
+                         duration = 7)
+        removeModal()
+      }, error = function(e) {
+        showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+      })
+      if (exists("resp")) {
+        if (resp$status_code != 200) {
+          showNotification("The IR Sub-collection names couldn't be retrieved",
+                           duration = 7,
+                           action = a(href = "javascript:location.reload();", "Reload page"))
+          ir_subcoll_names_obj <- data.table(domain_name=c(), mining_opts=c())
+        } else {
+          content <- httr::content(resp)
+          ir_subcoll_names_obj <- data.table::rbindlist(content)
+        }
+      } else {
+        ir_subcoll_names_obj <- data.table(subcoll=c(""), description=c(""))
+      }
+      irscrv$ir_subcoll_names <- ir_subcoll_names_obj
+      
+      
       #runjs(inactivity)
       #shinyjs::hide("authreg")
       hideTab("tabs", "login_element", session)
@@ -770,10 +1028,11 @@ server <- function(input, output, session){
                                textInput("search_crit_2", "Secondary Search Topic:", placeholder = "Ex.: creep"),
                                textInput("additional_key_1", "Additional Search Key 1:", placeholder = "Ex.: TiAl"),
                                textInput("additional_key_2", "Additional Search Key 2:", placeholder = "Ex.: γ-TiAl"),
-                               actionButton("submitCollectionJob",
+                               disabled(actionButton("submitCollectionJob",
                                             "Submit Job",
+                                            title = "this option is disabled ",
                                             icon = icon("paper-plane", verify_fa = FALSE),
-                                            style = "bordered; white-space:normal"),
+                                            style = "bordered; white-space:normal")),
                                actionButton("resetCollectionJobInputs",
                                             "Reset Inputs",
                                             icon = icon("sync", verify_fa = FALSE),
@@ -802,7 +1061,7 @@ server <- function(input, output, session){
                 navbarMenu(
                   "Literature Selection",
                   # UI for Search
-                  tabPanel("Search",
+                  tabPanel("Lexical Search",
                            value = "search",
                            #titlePanel("Search Interface"),
                            sidebarLayout(
@@ -841,6 +1100,7 @@ server <- function(input, output, session){
                                             style = "bordered; white-space:normal"),
                                actionButton('irSaveResult',
                                             'Save Results',
+                                            title = "this option is disabled in the prototype mode",
                                             icon = icon("save", verify_fa = FALSE),
                                             style = "bordered; white-space:normal"),
                                width = 4
@@ -862,6 +1122,37 @@ server <- function(input, output, session){
                              )
                            )
                   ),
+                  tabPanel("Semantic Search",
+                           value = "vec_search",
+                           column(12,
+                                  column(7,
+                                         div(textInput("vecQuery",
+                                                       label = "Search",
+                                                       value = "minimum creep rate of TiAl alloys",
+                                                       placeholder = "Enter your query to find relevant papers; e.g., minimum creep rate of titanium aluminide",
+                                                       width = "100%"),
+                                             style="padding: 12px 0;"),
+                                         align = "center"),
+                                  column(2,
+                                         sliderInput("similarity_threshold",
+                                                     "Match Limit",
+                                                     min = 0, max = 1, value = 0.65, step = 0.01),
+                                         align = "center"),
+                                  column(3,
+                                         div(actionButton('submitVecSearch',
+                                                          'Submit Search',
+                                                          icon = icon("paper-plane", verify_fa = FALSE),
+                                                          style = "bordered; white-space:normal"),
+                                             actionButton('irSaveVecResult',
+                                                          'Save Results',
+                                                          title = "this option is disabled in the prototype mode",
+                                                          icon = icon("save", verify_fa = FALSE),
+                                                          style = "bordered; white-space:normal"),
+                                             style = "padding: 35px 0;"),
+                                         align = "left")),
+                           column(12, br()),
+                           dataTableOutput("searchVecResult")
+                  ),
                   tabPanel("Manage Taxonomy",
                            value = "taxonomy",
                            mainPanel(
@@ -878,7 +1169,7 @@ server <- function(input, output, session){
                 # UI for Mining
                 navbarMenu(
                   # UI for Mining Menu
-                  "Mining",
+                  "Data Extraction",
                   tabPanel("Create Job",
                            value = "mine",
                            sidebarLayout(
@@ -912,9 +1203,240 @@ server <- function(input, output, session){
                                width = 8
                              )
                            )
-                          )
+                  ),
+                  tabPanel("Demo",
+                           value = "demo",
+                           mainPanel(
+                             width = 12,
+                             tabsetPanel(
+                               id = "extraction",
+                               tabPanel("Online Data Extraction",
+                                        value = "ode",
+                                        div(
+                                          br(),
+                                          fluidRow(
+                                            rclipboardSetup(),
+                                            column(5,
+                                                   selectInput(inputId = "ode_ir_subcoll",
+                                                               label = "Select a Sub-Collection",
+                                                               choices = irscrv$ir_subcoll_names$`_id`,
+                                                               selected = "gTiAl_minCR",
+                                                               width = "100%"),
+                                                   selectInput(inputId = "de_model",
+                                                               label = "Select a Model",
+                                                               choices = c("gpt-4", "gpt-4o", "gpt-4o-mini", "o3-mini", "o4-mini", "gpt-4.1"),
+                                                               selected = "gpt-4o",
+                                                               width = "100%"),
+                                                   selectInput(inputId = "de_schema_name",
+                                                               label = "Select a Schema",
+                                                               choices = de_schema_names(),
+                                                               selected = NULL,
+                                                               width = "100%"),
+                                                   selectInput(inputId = "de_source_format",
+                                                               label = "Select a source data format",
+                                                               choices = c("Text", "Grobid-TEIXML", "Grobid-TEIXML-To-JSON"),
+                                                               selected = "Text",
+                                                               width = "100%"),
+                                                   fluidRow(
+                                                     column(6,
+                                                            actionButton('loadODEDataset',
+                                                                         'Select Data',
+                                                                         icon = icon("table", verify_fa = FALSE),
+                                                                         style = "bordered; white-space:normal",
+                                                                         width = "100%")
+                                                     ),
+                                                     column(6,
+                                                            actionButton('resetODEReq',
+                                                                         'Reset',
+                                                                         icon = icon("sync", verify_fa = FALSE),
+                                                                         style = "bordered; white-space:normal",
+                                                                         width = "100%")
+                                                     )
+                                                   ),
+                                                   br(),
+                                                   div(style = "text-align: center;",
+                                                       disabled(actionButton('submitODEReq',
+                                                                             'Submit',
+                                                                             icon = icon("paper-plane", verify_fa = FALSE),
+                                                                             style = "bordered; white-space:normal;",
+                                                                             width = "50%"))
+                                                   )
+                                            ),
+                                            column(1,
+                                                   div(style = "border-left: 2px dashed #ccc; height: 300px; margin: auto;")),
+                                            column(6,
+                                                   htmlOutput("de_display_tree")
+                                            )
+                                          ),
+                                          tags$hr(style="border: none; border-top: 2px dashed #ccc; width: 80%; margin-left: auto; margin-right: auto;"),
+                                          br(),
+                                          htmlOutput("odeResponseUI")
+                                        )
+                               ),
+                               tabPanel("Define Schema",
+                                        value = "de_create_schema",
+                                        sidebarLayout(
+                                          sidebarPanel(
+                                            h5(HTML("<b>Create Schema for Data Extraction</b>")),
+                                            textInput("deSchemaName",
+                                                      "Schema Name*"),
+                                            textAreaInput("deSchemaDesc",
+                                                      "Schema Description*"),
+                                            actionButton('addDESchemaElement',
+                                                         'Add Element',
+                                                         icon = icon("plus", verify_fa = FALSE),
+                                                         style = "bordered; white-space:normal;",
+                                                         width = "100%"),
+                                            column(12, br()),
+                                            actionButton('saveDESchema',
+                                                         'Save Schema',
+                                                         icon = icon("save", verify_fa = FALSE),
+                                                         style = "bordered; white-space:normal;",
+                                                         width = "100%"),
+                                            column(12, br()),
+                                            h5(HTML("Note: Please define schema elements in a top-down sequence, e.g., composition > production process > microstructure properties > specific mechanical test")),
+                                            width = 4
+                                          ),
+                                          mainPanel(
+                                            div(id = "DESchemaContainer"),
+                                            width = 8
+                                          )
+                                        )
+                               )
+                             )
+                           )
+                  )
+                )
+                
+      )
+      
+      appendTab("tabs",
+                navbarMenu(
+                  "Knowledge Reasoning",
+                  # UI for QA
+                  tabPanel("Text-Reasoning",
+                           value = "tqa",
+                           column(12,
+                                  column(7,
+                                         div(textInput("tqa_query",
+                                                       label = "Ask a Question",
+                                                       value = "how does microstructure influence creep rate?",
+                                                       placeholder = "Enter your question, e.g., how does microstructure influence creep rate?",
+                                                       width = "100%"),
+                                             style="padding: 12px 0;")),
+                                  column(5,
+                                         div(selectInput(inputId = "tqa_ir_subcoll", 
+                                                         label = "Select a Sub-Collection", 
+                                                         choices = irscrv$ir_subcoll_names$`_id`,
+                                                         selected = "gTiAl_minCR",
+                                                         width = "70%"),
+                                             style="padding: 12px 0;"))),
+                           column(12,
+                                  column(2,
+                                         div(selectInput(inputId = "tqa_sentence_model", 
+                                                         label = "Sentence Model", 
+                                                         choices = c("all-MiniLM-L6-v2", "all-MiniLM-L12-v2"),
+                                                         selected = "all-MiniLM-L12-v2"),
+                                             style="padding: 12px 0;")),
+                                  column(2,
+                                         div(selectInput(inputId = "tqa_question_answer_model", 
+                                                         label = "Answer Generating Model", 
+                                                         choices = c("gpt-4", "gpt-4o", "gpt-4o-mini", "o3-mini", "o4-mini", "gpt-4.1", "alias-large", "alias-opengptx", "1 - Teuken-7B-instruct-research-v0.4 - The OpenGPT-X model", "10 Mistral-Nemo-Instruct-2407 - Our fast-experimental - with a large context size", "1 - Llama3 405 the best general model and big context size", "Llama-3.3-70B-Instruct", "DeepSeek-V3-0324", "gpt-oss-120b"),
+                                                         selected = "gpt-4o"),
+                                             style="padding: 12px 0;")),
+                                  column(2,
+                                         sliderInput("tqa_sentence_similarity_threshold",
+                                                     "Match Limit",
+                                                     min = 0, max = 1, value = 0.3, step = 0.01),
+                                         align = "center"),
+                                  column(2,
+                                         sliderInput("tqa_sentence_per_passage",
+                                                     "Sentence per Passage",
+                                                     min = 1, max = 5, value = 5, step = 1),
+                                         align = "center"),
+                                  column(2,
+                                         sliderInput("tqa_rel_passages",
+                                                     "Passage per Document",
+                                                     min = 1, max = 5, value = 5, step = 1),
+                                         align = "center"),
+                                  column(2,
+                                         sliderInput("tqa_adj_sentences",
+                                                     "Adjacent Sentence",
+                                                     min = 0, max = 3, value = 0, step = 1),
+                                         align = "center")),
+                           column(12,
+                                  actionButton('submitTQAReq',
+                                               'Submit Request',
+                                               icon = icon("paper-plane", verify_fa = FALSE),
+                                               style = "bordered; white-space:normal"),
+                                  actionButton('resetTQAReq',
+                                               'Reset',
+                                               icon = icon("sync", verify_fa = FALSE),
+                                               style = "bordered; white-space:normal"),
+                                  align = "center"),
+                           column(12, br()),
+                           tags$hr(style="border: none; border-top: 2px dashed #ccc; width: 30%; margin-left: auto; margin-right: auto;"),
+                           column(12, br()),
+                           htmlOutput("tqaResponseUI")
+                  ),
+                  tabPanel("Multimodal-Reasoning",
+                           value = "mmqa",
+                           column(12,
+                                  column(7,
+                                         div(textInput("mmqa_query",
+                                                       label = "Ask a Question",
+                                                       placeholder = "Enter your question, e.g., how does microstructure influence creep rate?",
+                                                       value = "how does lamellar spacing influence minimum creep rate?",
+                                                       width = "100%"),
+                                             style="padding: 12px 0;")),
+                                  column(5,
+                                         div(selectInput(inputId = "mmqa_ir_subcoll", 
+                                                         label = "Select a Sub-Collection", 
+                                                         choices = irscrv$ir_subcoll_names$`_id`,
+                                                         selected = "gTiAl_minCR",
+                                                         width = "70%"),
+                                             style="padding: 12px 0;"))),
+                           column(12,
+                                  column(3,
+                                         div(selectInput(inputId = "mmqa_multimodal_model", 
+                                                         label = "Select a Model", 
+                                                         choices = c("gpt-4o", "gpt-4o-mini", "o4-mini", "gpt-4.1"), # gpt-4 is not working
+                                                         selected = "gpt-4o"),
+                                             style="padding: 12px 0;")),
+                                  disabled(column(3,
+                                         div(prettyCheckbox("mmqa_metadata_include",
+                                                            "Include Metadata from Text",
+                                                            icon = icon("check", verify_fa = FALSE),
+                                                            animation = "smooth"),
+                                             style="padding: 42px 0;"))),
+                                  column(2,
+                                         div(actionButton('loadMMQADataset',
+                                                          'Show Dataset',
+                                                          icon = icon("table", verify_fa = FALSE),
+                                                          style = "bordered; white-space:normal"),
+                                             style="padding: 36px 0;"),
+                                         align = "right"),
+                                  column(2,
+                                         div(actionButton('submitMMQAReq',
+                                                          'Submit Request',
+                                                          icon = icon("paper-plane", verify_fa = FALSE),
+                                                          style = "bordered; white-space:normal"),
+                                             style="padding: 36px 0;"),
+                                         align = "center"),
+                                  column(2,       
+                                         div(actionButton('resetMMQAReq',
+                                                          'Reset',
+                                                          icon = icon("sync", verify_fa = FALSE),
+                                                          style = "bordered; white-space:normal"),
+                                             style="padding: 36px 0;"),
+                                         align = "left")),
+                           tags$hr(style="border: none; border-top: 2px dashed #ccc; width: 30%; margin-left: auto; margin-right: auto;"),
+                           column(12, br()),
+                           htmlOutput("mmqaResponseUI")
+                  )
                 )
       )
+      
                 
       # appendTab("tabs",
       #           # UI for Analytics
@@ -927,37 +1449,41 @@ server <- function(input, output, session){
       #           )
       # )
       #         
-      # appendTab("tabs",
-      #           # UI for User User API Management
-      #           navbarMenu(
-      #             "User Profile",
-      #             tabPanel("Change Password",
-      #                      value = "changePassword",
-      #                      RegLog_credsEdit_UI("cust_id")
-      #               
-      #             ),
-      #             tabPanel(title = "API Key Management",
-      #                      value = "apiKeyMgmt",
-      #                      sidebarLayout(
-      #                        sidebarPanel(
-      #                          textInput("elsevier_api_key", "Elsevier API Key:"),
-      #                          textInput("springer_api_key", "Springer API Key:"),
-      #                          textInput("wiley_api_key", "Wiley API Key:"),
-      #                          actionButton("validateKeys",
-      #                                       "Validate",
-      #                                       style = "bordered; white-space:normal"),
-      #                          actionButton("saveKeys",
-      #                                       "Save",
-      #                                       style = "bordered; white-space:normal")
-      #                        ),
-      #                        mainPanel(
-      #                          h5(HTML("<b>VALIDATION</b>")),
-      #                          verbatimTextOutput("apiKeyValidate")
-      #                        )
-      #                      )
-      #             )
-      #           )
-      # )
+      appendTab("tabs",
+                # UI for User User API Management
+                navbarMenu(
+                  "User Profile",
+                  tabPanel("Change Password",
+                           value = "changePassword",
+                           #RegLog_credsEdit_UI("cust_id")
+
+                ),
+                tabPanel(title = "API Key Management",
+                         value = "apiKeyMgmt",
+                         sidebarLayout(
+                           sidebarPanel(
+                             textInput("elsevier_api_key", "Elsevier API Key:"),
+                             textInput("springer_api_key", "Springer API Key:"),
+                             textInput("wiley_api_key", "Wiley API Key:"),
+                             textInput("blablador_api_key", "BlaBlaDor API Key:"),
+                             textInput("azure_openai_api_key", "Azure OpenAI API Key:"),
+                             textInput("azure_openai_api_endpoint", "Azure OpenAI API Endpoint"),
+                             textInput("azure_openai_api_version", "Azure OpenAI API Version"),
+                             actionButton("validateKeys",
+                                          "Validate",
+                                          style = "bordered; white-space:normal"),
+                             actionButton("saveKeys",
+                                          "Save",
+                                          style = "bordered; white-space:normal")
+                           ),
+                           mainPanel(
+                             h5(HTML("<b>VALIDATION</b>")),
+                             verbatimTextOutput("apiKeyValidate")
+                           )
+                         )
+                )
+              )
+      )
         
       appendTab("tabs",
                 #UI for About US
@@ -1036,18 +1562,20 @@ server <- function(input, output, session){
                              br(),
                              br(),
                              h3("Features"),
-                             p("- Acquire literature from multiple data sources"),
+                             p("- Acquire literature from multiple digital libraries"),
                              p("- Search of experimental datasets embedded into different visual representations"),
-                             p("- Multimodal extraction of experimental data, e.g., text, plots, and tables"),
-                             p("- Modeling of extracted datasets"),
+                             p("- Reasoning of experimental datasets of a multimodal nature, e.g., from text, plots, and tables"),
+                             p("- Extraction of experimental datasets from different modes, e.g., text, plots, and tables (UNDER TESTING)"),
+                             p("- Curation of extracted datasets (UNDER DEVELOPMENT)"),
+                             p("- Modeling of extracted datasets (UNDER DEVELOPMENT)"),
                              br(),
                              br(),
                              br(),
                              h3("Who we are"),
                              p(a("Moin", href="https://en.wikipedia.org/wiki/Moin", target="_blank"), 
                                ", SciLitMiner is developed by Vipul Gupta, a Data Scientist turned Computational Materials Scientist 
-                               as part of his PhD project work carried out under the supervision of Prof. Dr. Florian Pyczak and Prof. Dr. 
-                               Ingo Schmitt in the Helmholtz-Zentrum Hereon at the Institute of Materials Physics, Department of Metal Physics.")
+                               as part of his PhD project work carried out under the supervision of Prof. Dr. Florian Pyczak in the 
+                               Helmholtz-Zentrum Hereon at the Institute of Materials Physics, Department of Metal Physics.")
                            )
                          )
                 )
@@ -1172,14 +1700,15 @@ server <- function(input, output, session){
         fluidRow(
           column(width = 9,
                  column(width = 8, textInput(paste("keyword", id, sep = "_"), 
-                                             "Query", 
-                                             placeholder = "Eg.: titanium aluminide", 
+                                             "Query",
+                                             value = "minimum creep rate",
+                                             placeholder = "Eg.: titanium aluminide",
                                              width = "100%"), 
                         style = "padding-right:2px;"),
                  column(width = 4, selectInput(paste("field", id, sep = "_"), 
                                                "Field", 
                                                choices = c("all", "title", "abstract", "body", "captions" = "captions.description", "references"), 
-                                               selected = "all",
+                                               selected = "captions.description",
                                                width = "100%"), 
                         style = "padding-left:2px;padding-right:2px"),
                  style = "padding-left:0;padding-right:0;"
@@ -1244,7 +1773,7 @@ server <- function(input, output, session){
                                                             icon = icon("check", verify_fa = FALSE),
                                                             animation = "smooth"),
                                   style = "padding-left:0;padding-right:0;margin-left:-13%;")),
-          conditionalPanel(condition = paste0("input.field", "_", id, " != 'all'", " && ", "input.keyword", "_", id, ".indexOf(' ') > 0"),
+          conditionalPanel(condition = paste0("input.field", "_", id, " != 'all'"), #, " && ", "input.keyword", "_", id, ".indexOf(' ') > 0"
                            column(width = 4, prettyCheckbox(paste("phrase", id, sep = "_"),
                                           "Phrase",
                                           icon = icon("check", verify_fa = FALSE),
@@ -1294,90 +1823,113 @@ server <- function(input, output, session){
     }
   }, ignoreInit = TRUE, ignoreNULL = TRUE)
   
+  # Auxiliary function
+  shinyInput <- function(FUN, len, id, ...) {
+    inputs <- character(len)
+    for (i in seq_len(len)) {
+      inputs[i] <- as.character(FUN(paste0(id, i), ...))
+    }
+    return(inputs)
+  }
   
   # Search: Search form submission
-  observeEvent(input$submitSearch, {
-    
-    output$searchInfoTag <- renderText({NULL})
-    output$searchInfo <- renderText({NULL})
-    
-    lstQryObj <- list()
-    if (length(insertCnt())) {
-      
-      # Code to create JSON query Object
-      for (i in 1:length(insertCnt())) {
-        id <- insertCnt()[i]
-          
-        # Check if query field is empty
-        if (input[[paste("keyword", id, sep = "_")]] == "")
-          next
-        
-        if (i == 1)
-          qType = ifelse(input[[paste("nature1", id, sep = "_")]], "must", "should")
-        else
-          qType = ifelse(input[[paste("nature", id, sep = "_")]], "must", "should")
-        
-        if (input[[paste("ignore", id, sep = "_")]])
-          qType = "must_not"
-        
-        qryObj <- list(
-          type = qType,
-          field = input[[paste("field", id, sep = "_")]], 
-          keyword = input[[paste("keyword", id, sep = "_")]], 
-          phrase = input[[paste("phrase", id, sep = "_")]],
-          operator = ifelse(input[[paste("operator", id, sep = "_")]], "and", "or"),
-          figuretype = switch(is.null(input[[paste("figure_type", id, sep = "_")]]) + 1, 
-                              as.list(input[[paste("figure_type", id, sep = "_")]]), 
-                              NA))
-        lstQryObj[[length(lstQryObj) + 1]] <- qryObj
+  observeEvent(list(input$submitSearch, input$submitVecSearch), {
+    if (input$tabs == "vec_search") {
+      if (input$vecQuery == "") {
+        output$searchResult <- renderDataTable(NULL)
+        showNotification(paste("Please define a query to perform a search"),
+                         type = "error",
+                         duration = 7)
+        return()
       }
-    } else {
-      output$searchResult <- renderDataTable(NULL)
-      showNotification(paste("Please add at least one search box to perform a search"),
-                       type = "error",
-                       duration = 7)
-      return()
-    }
-    
-    # Check if all query fields are empty
-    if (!length(lstQryObj)) {
-      output$searchResult <- renderDataTable(NULL)
-      showNotification(paste("Please provide a query to at least one search box to perform a search"),
-                       type = "warning",
-                       duration = 7)
-      return()
-    }
+      search_endpoint <- paste0(lstRESTRoutes$POST_IR_SEARCH, "?", "search_service=semantic")
+      jsonQryObj <- jsonlite::toJSON(list(query=input$vecQuery, similarity_threshold=input$similarity_threshold), auto_unbox = T)
+    } else if (input$tabs == "search") {
+      search_endpoint <- paste0(lstRESTRoutes$POST_IR_SEARCH, "?", "search_service=lexical")
+      output$searchInfoTag <- renderText({NULL})
+      output$searchInfo <- renderText({NULL})
       
-    # if (!input$coll == "all") {
-    #   qryObj <- list(type = "filter", 
-    #                   field = "collection", 
-    #                   keyword = input$coll, 
-    #                   phrase = "false", 
-    #                   operator = "or")
-    #   lstQryObj[[length(insertCnt) + 1]] = qryObj
-    # }
-    if (!input$jrnl == "all") {
-      qryObj <- list(type = "filter", 
-                      field = "journal", 
-                      keyword = input$jrnl, 
-                      phrase = "false", 
-                      operator = "or")
-      lstQryObj[[length(insertCnt()) + 2]] = qryObj
-    }
-    if (!input$ds == "all") {
-      sQryObj <- list(type = "filter", 
-                      field = "source", 
-                      keyword = input$ds, 
-                      phrase = "false", 
-                      operator = "or")
-      lstQryObj[[length(insertCnt()) + 3]] = qryObj
+      lstQryObj <- list()
+      if (length(insertCnt())) {
+        
+        # Code to create JSON query Object
+        for (i in 1:length(insertCnt())) {
+          id <- insertCnt()[i]
+          
+          # Check if query field is empty
+          if (input[[paste("keyword", id, sep = "_")]] == "")
+            next
+          
+          if (i == 1)
+            qType = ifelse(input[[paste("nature1", id, sep = "_")]], "must", "should")
+          else
+            qType = ifelse(input[[paste("nature", id, sep = "_")]], "must", "should")
+          
+          if (input[[paste("ignore", id, sep = "_")]])
+            qType = "must_not"
+          
+          qryObj <- list(
+            type = qType,
+            field = input[[paste("field", id, sep = "_")]], 
+            keyword = input[[paste("keyword", id, sep = "_")]], 
+            phrase = input[[paste("phrase", id, sep = "_")]],
+            operator = ifelse(input[[paste("operator", id, sep = "_")]], "and", "or"),
+            figuretype = switch(is.null(input[[paste("figure_type", id, sep = "_")]]) + 1, 
+                                as.list(input[[paste("figure_type", id, sep = "_")]]), 
+                                NA))
+          lstQryObj[[length(lstQryObj) + 1]] <- qryObj
+        }
+      } else {
+        output$searchResult <- renderDataTable(NULL)
+        showNotification(paste("Please add at least one search box to perform a search"),
+                         type = "error",
+                         duration = 7)
+        return()
+      }
+      
+      # Check if all query fields are empty
+      if (!length(lstQryObj)) {
+        output$searchResult <- renderDataTable(NULL)
+        showNotification(paste("Please provide a query to at least one search box to perform a search"),
+                         type = "warning",
+                         duration = 7)
+        return()
+      }
+      
+      # if (!input$coll == "all") {
+      #   qryObj <- list(type = "filter", 
+      #                   field = "collection", 
+      #                   keyword = input$coll, 
+      #                   phrase = "false", 
+      #                   operator = "or")
+      #   lstQryObj[[length(insertCnt) + 1]] = qryObj
+      # }
+      if (!input$jrnl == "all") {
+        qryObj <- list(type = "filter", 
+                       field = "journal", 
+                       keyword = input$jrnl, 
+                       phrase = "false", 
+                       operator = "or")
+        lstQryObj[[length(insertCnt()) + 2]] = qryObj
+      }
+      if (!input$ds == "all") {
+        sQryObj <- list(type = "filter", 
+                        field = "source", 
+                        keyword = input$ds, 
+                        phrase = "false", 
+                        operator = "or")
+        lstQryObj[[length(insertCnt()) + 3]] = qryObj
+      }
+      
+      jsonQryObj <- jsonlite::toJSON(lstQryObj, auto_unbox = T)
     }
     
-    jsonQryObj <- jsonlite::toJSON(lstQryObj, auto_unbox = T)
+    if (!exists("search_endpoint", inherits = FALSE))
+        return()
     
     # Call REST endpoint
     tryCatch({
-      resp <- httr::POST(lstRESTRoutes$POST_IR_SEARCH, body = list(qryObj = jsonQryObj), encode = "json")
+      resp <- httr::POST(search_endpoint, body = list(reqObj = jsonQryObj), encode = "json")
     }, warning = function(w) {
       showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
                        type = "warning",
@@ -1408,7 +1960,7 @@ server <- function(input, output, session){
     
     # Condition to check no result
     if (!length(lstResults)) {
-      output$searchResult <- renderDataTable({
+      output$searchVecResult <- output$searchResult <- renderDataTable({
         dtEmpty <- data.table(doi=character(),
                    title=character(),
                    score=character(),
@@ -1434,13 +1986,14 @@ server <- function(input, output, session){
     
     lstSimplifiedResults <- lapply(lstResults, function(doc) {
       doi_link <- paste0("https://doi.org/", doc$`_id`)
-      list(doi = paste0("<a title=", doi_link, " href=", doi_link, " target='_blank'>", doc$`_id`, "</a>"), 
+      list(doi_link = paste0("<a title=", doi_link, " href=", doi_link, " target='_blank'>", doc$`_id`, "</a>"), 
            title = doc$title, 
            score = doc$score, 
            "caption count" = length(doc$captions),
            #collection = doc$collection,
            abstract = doc$abstract, 
-           captions = list(switch((length(doc$captions) > 0) + 1, NA, doc$captions)))
+           captions = list(switch((length(doc$captions) > 0) + 1, NA, doc$captions)),
+           doi = doc$`_id`)
     })
     searchRes$dt <- rbindlist(lstSimplifiedResults)
     
@@ -1449,19 +2002,10 @@ server <- function(input, output, session){
     #   dtRes[, c("caption count") := NULL]
     
     # Round score value to two decimals
-    searchRes$dt[, score := round(score, 1)]
+    searchRes$dt[, score := round(score, 3)]
     searchRes$dt[, REF_ID := seq.int(NROW(searchRes$dt))]
     
     # Code to make data table reactive
-    
-    # Auxiliary function
-    shinyInput <- function(FUN, len, id, ...) {
-      inputs <- character(len)
-      for (i in seq_len(len)) {
-        inputs[i] <- as.character(FUN(paste0(id, i), ...))
-      }
-      return(inputs)
-    }
     
     # Reactive
     getDTReactive <- reactive({
@@ -1483,9 +2027,9 @@ server <- function(input, output, session){
     # paste0('setTimeout(function() {table.page(', 0 ,').draw(false);}, 10);')
     
     # Render search result to the UI
-    output$searchResult <- renderDataTable({
+    output$searchVecResult <- output$searchResult <- renderDataTable({
       #dt <- searchRes$dt
-      table <- searchRes$dt[, -c("REF_ID", "abstract", "captions")] %>%
+      table <- searchRes$dt[, -c("doi", "REF_ID", "abstract", "captions")] %>%
         DT::datatable(filter = list(position = 'top', clear = FALSE), 
                       rownames = F,
                       extensions = c("FixedColumns", "Buttons"),
@@ -1530,15 +2074,22 @@ server <- function(input, output, session){
   
   # When press delete_row, remove row
   observeEvent(input$delete_row, {
+    if (input$tabs == "search") {
+      pgLen <- input$searchResult_state$length
+      pgStart <- input$searchResult_state$start
+    } else if (input$tabs == "vec_search") {
+      pgLen <- input$searchVecResult_state$length
+      pgStart <- input$searchVecResult_state$start
+    }
     selectedRow <- as.numeric(strsplit(input$delete_row, "_")[[1]][2])
     searchRes$dt <- subset(searchRes$dt, REF_ID != selectedRow)
-    if (input$searchResult_state$length == -1)
+    if (pgLen == -1)
       pageNo <- -1
     else
-      pageNo <- as.numeric(input$searchResult_state$start / input$searchResult_state$length)
-    if (NROW(searchRes$dt) / input$searchResult_state$length == pageNo)
+      pageNo <- as.numeric(pgStart / pgLen)
+    if (NROW(searchRes$dt) / pgLen == pageNo)
       pageNo <- pageNo - 1
-    pg_load_js <<- paste0('setTimeout(function() {table.page.len(', input$searchResult_state$length, ').draw(false);
+    pg_load_js <<- paste0('setTimeout(function() {table.page.len(', pgLen, ').draw(false);
                           table.page(', pageNo ,').draw(false);}, 100);')
     pgLoadJS(pg_load_js)
   }, ignoreInit = TRUE, ignoreNULL = TRUE)
@@ -1560,9 +2111,9 @@ server <- function(input, output, session){
                     br(),
                     br(),
                     tryCatch({
-                      cap$path <- gsub("U:/app/data/global//processed", replacement = "/data/global/processed", cap$path)
-                      tags$img(src = base64enc::dataURI(file = cap$path, mime = "image/jpeg"), 
-                               style="width: 480px") #640
+                      cap$path <- cap$path
+                      tags$img(src = base64enc::dataURI(file = gsub("U:/app/data/global//processed", replacement = "/data/global/processed", cap$path), mime = "image/jpeg"), 
+                               style="width: 480px")
                     }, warning = function(w) {
                       tags$img(src = "no_img.jpeg", 
                                style="width: 200px")
@@ -1583,6 +2134,29 @@ server <- function(input, output, session){
   
   # When press save results, save sub collection
   observeEvent(input$irSaveResult, {
+    
+    if (length(searchRes$dt) && nrow(searchRes$dt)) {
+      showModal(modalDialog(
+        title = strong("Save Search Result"),
+        textInput("ir_result_name", "Name:*", placeholder = "Ex.: tialcreep_subcoll"),
+        textAreaInput("ir_result_desc", "Description:*", placeholder = "Ex.: this sub-collection is a set of documents that includes only creep curves",
+                      width = "120%"),
+        actionButton("ir_save_result_final", "save"),
+        modalButton("cancel"),
+        easyClose = F,
+        size = "m",
+        footer = NULL
+      ))
+    } else {
+      showNotification("No data found!",
+                       type = "error",
+                       duration = 3)
+      return()
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  # When press save results, save sub collection
+  observeEvent(input$irSaveVecResult, {
     
     if (length(searchRes$dt) && nrow(searchRes$dt)) {
       showModal(modalDialog(
@@ -1650,6 +2224,35 @@ server <- function(input, output, session){
       showNotification("The search results are successfully saved",
                        duration = 7)
       removeModal()
+      
+      # ir sub collection names
+      tryCatch({
+        resp <- httr::GET(lstRESTRoutes$GET_IR_SUBCOLL_INFO)
+      }, warning = function(w) {
+        showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                         type = "warning",
+                         duration = 7)
+        removeModal()
+      }, error = function(e) {
+        showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+      })
+      if (exists("resp")) {
+        if (resp$status_code != 200) {
+          showNotification("The IR Sub-collection names couldn't be retrieved",
+                           duration = 7,
+                           action = a(href = "javascript:location.reload();", "Reload page"))
+          ir_subcoll_names_obj <- data.table(domain_name=c(), mining_opts=c())
+        } else {
+          content <- httr::content(resp)
+          ir_subcoll_names_obj <- data.table::rbindlist(content)
+        }
+      } else {
+        ir_subcoll_names_obj <- data.table(subcoll=c(""), description=c(""))
+      }
+      irscrv$ir_subcoll_names <- ir_subcoll_names_obj
     }
   }, ignoreInit = TRUE, ignoreNULL = TRUE)
   
@@ -1742,7 +2345,7 @@ server <- function(input, output, session){
             actionButton('syn_create',
                          'Create Synonyms',
                          icon = icon("paper-plane", verify_fa = FALSE),
-                         style = "bordered; white-space:normal"),
+                         style = "bordered; white-space:normal")
           ),
           br(),
           fluidRow(  
@@ -1907,6 +2510,396 @@ server <- function(input, output, session){
   }, ignoreInit = TRUE, ignoreNULL = TRUE)
   
   
+  #############################Knowledge Reasoning##############################
+  
+  observeEvent(input$tqa_query, {
+    if (is.null(input$tqa_query) || trimws(input$tqa_query) == "") {
+      shinyjs::disable("submitTQAReq")
+    } else {
+      shinyjs::enable("submitTQAReq")
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  observeEvent(input$submitTQAReq, {
+    output$tqaResponseUI <- renderUI({
+      NULL
+    })
+    tqaTableVisible(FALSE) 
+    tryCatch({
+      lstTQAObj <- list(query=input$tqa_query,
+                        ir_subcoll=input$tqa_ir_subcoll,
+                        sentence_model=input$tqa_sentence_model,
+                        qa_model=input$tqa_question_answer_model,
+                        sentence_similarity_threshold=input$tqa_sentence_similarity_threshold,
+                        sentence_per_passage=input$tqa_sentence_per_passage,
+                        rel_passages=input$tqa_rel_passages,
+                        adj_sentences=input$tqa_adj_sentences)
+      jsonTQAObj <- jsonlite::toJSON(lstTQAObj, auto_unbox = T)
+      resp <- httr::POST(lstRESTRoutes$POST_TQA,
+                         body = list(reqObj = jsonTQAObj),
+                         encode = "json")
+    }, warning = function(w) {
+      showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                       type = "warning",
+                       duration = 7)
+      removeModal()
+      output$tqaResponseUI <- renderUI({
+        NULL
+      })
+    }, error = function(e) {
+      showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$tqaResponseUI <- renderUI({
+        NULL
+      })
+    })
+    if (!exists("resp")) {
+      showNotification(paste("The query couldn't be processed due to missing service REST endpoint"),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$tqaResponseUI <- renderUI({
+        NULL
+      })
+    } else if (!resp$status_code == 200) {
+      showNotification(paste("The query couldn't be processed due to following error:",
+                             httr::content(resp, type="application/json"), ". Please contact administrator"),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$tqaResponseUI <- renderUI({
+        NULL
+      })
+    } else {
+      
+      content <- httr::content(resp)
+      
+      # Handle the output when the button is pressed
+      output$tqaResponseUI <- renderUI({
+        
+        answer <- content$answer
+        relevant_data <- content$relevant_data
+        
+        if (is.null(relevant_data)) {
+          tqa_relevant_data <<- data.table(sequence = character(0), doi = character(0), passages = character(0))
+        } else {
+          tqa_relevant_data <<- rbindlist(relevant_data, fill = T)
+          tqa_relevant_data[, doi := paste0("<a title=", paste0("https://doi.org/", doi), " href=", paste0("https://doi.org/", doi), " target='_blank'>", doi, "</a>")]
+        }
+        
+        tagList(
+          h3("Answer to Your Question:", style = "color: #4CAF50;"),
+          
+          # Display answer in a read-only Ace Editor
+          div(style = "width: 100%; border: 2px solid #4CAF50; padding: 0px 5px; font-size: 16px;",
+              p(answer)
+              #includeMarkdown(answer)
+          ),
+          
+          tags$div(style = "margin-bottom: 15px;"),
+          
+          # Copy Button with Clipboard Support
+          rclipButton("copy_tqa_answer", "Copy Answer", answer, icon = icon("copy"), class = "btn-primary"),
+          tags$div(style = "margin-bottom: 15px;"),
+          actionButton("tqa_toggleDT", "Show Additional Information", icon = icon("table")),
+          hidden(
+            div(
+              id = "relevantTableDiv",
+              style = "border: 2px solid #4CAF50; padding: 15px; background-color: #f9f9f9; border-radius: 8px; margin-top: 20px; margin-left: auto; margin-right: auto;",
+              h4("Relevant Sentences and DOIs:", style = "color: #333;"),
+              DT::dataTableOutput("relevantSentencesTable")
+            )
+          )
+        )
+      })
+      
+      # Render the combined relevant sentences and DOI table
+      output$relevantSentencesTable <- DT::renderDataTable({
+        DT::datatable(tqa_relevant_data,
+                      filter = list(position = 'top', clear = FALSE), 
+                      rownames = F,
+                      extensions = c("FixedColumns", "Buttons"),
+                      options = list(paging = TRUE,
+                                     pageLength = -1,
+                                     columnDefs = list(list(width = '20%', targets = 1),
+                                                       list(width = '5%', targets = 0),
+                                                       list(className = 'dt-center', targets = 0)),
+                                     lengthMenu = list(c(3, 5, 10, -1), c("3", "5", "10", "all")),
+                                     autoWidth = F,
+                                     scrollX = T,
+                                     dom = 'l<"sep">Bfrtip',
+                                     buttons = list(list(extend = "excel",
+                                                         text = "EXCEL")),
+                                     language = list(
+                                       zeroRecords = "No data to display")),
+                      selection = "none",
+                      escape = c(1))
+      })
+      
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  # Toggle the visibility of the table
+  observeEvent(input$tqa_toggleDT, {
+    toggle("relevantTableDiv")
+    if (tqaTableVisible()) {
+      updateActionButton(session, "tqa_toggleDT", label = "Show Additional Information", icon = icon("table"))
+      tqaTableVisible(FALSE)
+    } else {
+      updateActionButton(session, "tqa_toggleDT", label = "Hide Additional Information", icon = icon("times"))
+      tqaTableVisible(TRUE)
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  observeEvent(input$resetTQAReq, {
+    output$tqaResponseUI <- renderUI({
+      NULL
+    })
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  # Multimodal Question Answering
+  observeEvent(input$submitMMQAReq, {
+    
+    output$mmqaResponseUI <- renderUI({
+      NULL
+    })
+    
+    dtImg <- mmqa_data_processed()[selected_mmqa_indices(), c("doi", "path")]
+    dtImg[, path := gsub("U:/app/data/global//processed", replacement = "/data/global/processed", path)]
+    
+    tryCatch({
+      lstMMQAObj <- list(query=input$mmqa_query,
+                        images=dtImg,
+                        qa_model=input$mmqa_multimodal_model,
+                        metadata=input$mmqa_metadata_include)
+      
+      jsonMMQAObj <- jsonlite::toJSON(lstMMQAObj, auto_unbox = T)
+      resp <- httr::POST(lstRESTRoutes$POST_MMQA,
+                         body = list(reqObj = jsonMMQAObj),
+                         encode = "json")
+    }, warning = function(w) {
+      showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                       type = "warning",
+                       duration = 7)
+      removeModal()
+      output$mmqaResponseUI <- renderUI({
+        NULL
+      })
+    }, error = function(e) {
+      showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$mmqaResponseUI <- renderUI({
+        NULL
+      })
+    })
+    if (!exists("resp")) {
+      showNotification(paste("The query couldn't be processed due to missing service REST endpoint"),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$mmqaResponseUI <- renderUI({
+        NULL
+      })
+    } else if (!resp$status_code == 200) {
+      showNotification(paste("The query couldn't be processed due to following error:",
+                             httr::content(resp, type="application/json"), ". Please contact administrator"),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$mmqaResponseUI <- renderUI({
+        NULL
+      })
+    } else {
+      
+      content <- httr::content(resp)
+      answer <- content$answer
+      reason <- content$reason
+      
+      # Handle the output
+      output$mmqaResponseUI <- renderUI({
+        tagList(
+          h3("Answer to Your Question:", style = "color: #4CAF50;"),
+          p(answer, style = "font-size: 16px;"),
+          br(),
+          h3("Scientific Rationale:", style = "color: #4CAF50;"),
+          p(reason, style = "font-size: 16px;")
+        )
+      })
+    }
+    disable("submitMMQAReq")
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+  # Function to create a base64 image URI or fallback
+  create_image_uri <- function(path) {
+    path <- gsub("U:/app/data/global//processed", replacement = "/data/global/processed", path)
+    tryCatch({
+      if (file.exists(path)) {
+        img_data <- base64enc::dataURI(file = path, mime = "image/jpeg")
+        return(img_data)
+      } else {
+        return(NA)
+      }
+    }, error = function(e) {
+       return(NA)
+    })
+  }
+  
+  # Multimodal Question Answering
+  observeEvent(input$loadMMQADataset, {
+    selected_mmqa_indices <<- reactiveVal(integer(0))
+    
+    if (!is.null(current_mmqa_ir_subcoll()) && (input$mmqa_ir_subcoll == current_mmqa_ir_subcoll())) {
+      # Handle the output
+      output$mmqaResponseUI <- renderUI({
+        
+        withSpinner(tagList(
+          DT::dataTableOutput("mmqaDatasetDisplay")
+        ))
+        
+      })
+    } else {
+      tryCatch({
+        getURL <- paste0(lstRESTRoutes$GET_MMQADATASET, "?", "ir_subcoll=", input$mmqa_ir_subcoll)
+        resp <- httr::GET(getURL)
+      }, warning = function(w) {
+        showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                         type = "warning",
+                         duration = 7)
+        removeModal()
+        output$mmqaResponseUI <- renderUI({
+          NULL
+        })
+      }, error = function(e) {
+        showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+        output$mmqaResponseUI <- renderUI({
+          NULL
+        })
+      })
+      if (!exists("resp")) {
+        showNotification(paste("The data couldn't be loaded to missing service REST endpoint"),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+        output$mmqaResponseUI <- renderUI({
+          NULL
+        })
+      } else if (!resp$status_code == 200) {
+        showNotification(paste("The data couldn't be loaded due to following error:",
+                               httr::content(resp, type="application/json"), ". Please contact administrator"),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+        output$mmqaResponseUI <- renderUI({
+          NULL
+        })
+      } else {
+        
+        content <- httr::content(resp)
+        data <- data.table(rbindlist(content))
+        mmqa_data_raw(data)
+        current_mmqa_ir_subcoll(input$mmqa_ir_subcoll)
+        
+        # Handle the output
+        output$mmqaResponseUI <- renderUI({
+          
+          withSpinner(tagList(
+            DT::dataTableOutput("mmqaDatasetDisplay")
+          ))
+          
+        })
+      }
+    }
+    
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+  mmqa_data_processed <- reactive({
+    req(mmqa_data_raw())
+    mmqa_load_data <- mmqa_data_raw()[, image_uri := sapply(path, create_image_uri)]
+    mmqa_load_data[!is.na(image_uri)]
+    mmqa_load_data[, index := seq_len(.N)]
+    mmqa_load_data 
+  })
+  
+  # Render the combined relevant sentences and DOI table
+  output$mmqaDatasetDisplay <- DT::renderDataTable({
+    
+    mmqa_data <- mmqa_data_processed()[, .(
+      index = index,
+      doi = doi,
+      image_and_caption = sprintf('<div style="text-align: center;"><img src="%s" style="max-width: 300px; max-height: 300px; width: auto; height: auto;"><br><p>%s</p></div>', image_uri, caption),
+      select_image = shinyInput(actionButton, .N, "select_", label = "Select", class = "btn btn-primary",
+                                onclick = paste0('Shiny.onInputChange( "select_mmqa_data" , this.id, {priority: "event"})'))
+    )]
+    
+    DT::datatable(mmqa_data,
+                  filter = list(position = 'top', clear = FALSE), 
+                  rownames = F,
+                  extensions = 'FixedColumns',
+                  options = list(paging = TRUE,
+                                 pageLength = -1,
+                                 #stateSave = TRUE,
+                                 columnDefs = list(
+                                   list(targets = 0, visible = FALSE),
+                                   list(targets = 1, width = '25%'),
+                                   list(targets = 2, width = '70%'),
+                                   list(targets = 3, width = '10%', searchable = FALSE)
+                                 ),
+                                 lengthMenu = list(c(5, 10, -1), c("5", "10", "all")),
+                                 autoWidth = F,
+                                 scrollX = T,
+                                 dom = 'l<"sep">frtip',
+                                 language = list(
+                                   zeroRecords = "No data to display")),
+                  selection = "none",
+                  escape = FALSE)
+  }, server = F)
+  
+  # Observe button clicks
+  observeEvent(input$select_mmqa_data, {
+    selected_index <- as.numeric(sub("select_", "", input$select_mmqa_data))
+    current_indices <- selected_mmqa_indices()
+    
+    # Toggle the selection state
+    if (selected_index %in% current_indices) {
+      selected_mmqa_indices(setdiff(current_indices, selected_index))
+      
+      # Update button label and class to "Selected"
+      runjs(paste0("$('#select_", selected_index, "').text('Select');"))
+      runjs(paste0("$('#select_", selected_index, "').removeClass('btn-success').addClass('btn-primary');"))
+    } else {
+      if (length(current_indices) < max_mmqa_selection) {
+        selected_mmqa_indices(c(current_indices, selected_index))
+        
+        # Update button label and class to "Selected"
+        runjs(paste0("$('#select_", selected_index, "').text('Selected');"))
+        runjs(paste0("$('#select_", selected_index, "').removeClass('btn-primary').addClass('btn-success');"))
+      } else {
+        showNotification("You can only select up to 5 images", type = "warning")
+      }
+    }
+    # condition to disable/enable the submit button
+    if (length(selected_mmqa_indices()) > 0)
+      enable("submitMMQAReq")
+    else
+      disable("submitMMQAReq")
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    
+  observeEvent(input$resetMMQAReq, {
+    disable("submitMMQAReq")
+    output$mmqaResponseUI <- renderUI({
+      NULL
+    })
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  
+  
   ####################################MINING####################################
   
   
@@ -1983,6 +2976,635 @@ server <- function(input, output, session){
   output$loadMineResults <- reactive({
     
   })
+  
+  # Load Data Extraction dataset
+  observeEvent(input$loadODEDataset, {
+    selected_ode_indices <<- reactiveVal(integer(0))
+    
+    if (!is.null(current_ode_ir_subcoll()) && (input$ode_ir_subcoll == current_ode_ir_subcoll())) {
+      # Handle the output
+      output$odeResponseUI <- renderUI({
+        
+        withSpinner(tagList(
+          DT::dataTableOutput("odeDatasetDisplay")
+        ))
+        
+      })
+    } else {
+      tryCatch({
+        getURL <- paste0(lstRESTRoutes$GET_ODEDATASET, "?", "ir_subcoll=", input$ode_ir_subcoll)
+        resp <- httr::GET(getURL)
+      }, warning = function(w) {
+        showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                         type = "warning",
+                         duration = 7)
+        removeModal()
+        output$odeResponseUI <- renderUI({
+          NULL
+        })
+      }, error = function(e) {
+        showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+        output$odeResponseUI <- renderUI({
+          NULL
+        })
+      })
+      if (!exists("resp")) {
+        showNotification(paste("The data couldn't be loaded to missing service REST endpoint"),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+        output$odeResponseUI <- renderUI({
+          NULL
+        })
+      } else if (!resp$status_code == 200) {
+        showNotification(paste("The data couldn't be loaded due to following error:",
+                               httr::content(resp, type="application/json"), ". Please contact administrator"),
+                         type = "error",
+                         duration = 7)
+        removeModal()
+        output$odeResponseUI <- renderUI({
+          NULL
+        })
+      } else {
+        
+        content <- httr::content(resp)
+        data <- data.table(rbindlist(content))
+        ode_data_raw(data)
+        current_ode_ir_subcoll(input$ode_ir_subcoll)
+        
+        # Handle the output
+        output$odeResponseUI <- renderUI({
+          
+          withSpinner(tagList(
+            DT::dataTableOutput("odeDatasetDisplay")
+          ))
+          
+        })
+      }
+    }
+    
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  ode_data_processed <- reactive({
+    req(ode_data_raw())
+    ode_load_data <- ode_data_raw()
+    ode_load_data[, index := seq_len(.N)]
+    ode_load_data 
+  })
+  
+  # Render the combined relevant sentences and DOI table
+  output$odeDatasetDisplay <- DT::renderDataTable({
+    
+    ode_data <- ode_data_processed()[, .(
+      index = index,
+      doi = doi,
+      title = title,
+      select_paper = shinyInput(actionButton, .N, "select_ode_", label = "Select", class = "btn btn-primary",
+                                onclick = paste0('Shiny.onInputChange( "select_ode_data" , this.id, {priority: "event"})'))
+    )]
+    
+    DT::datatable(ode_data,
+                  filter = list(position = 'top', clear = FALSE), 
+                  rownames = F,
+                  extensions = 'FixedColumns',
+                  options = list(paging = TRUE,
+                                 pageLength = 10,
+                                 #stateSave = TRUE,
+                                 columnDefs = list(
+                                   list(targets = 0, visible = FALSE),
+                                   list(targets = 1, width = '25%'),
+                                   list(targets = 2, width = '70%'),
+                                   list(targets = 3, width = '10%', searchable = FALSE)
+                                 ),
+                                 lengthMenu = list(c(5, 10, -1), c("5", "10", "all")),
+                                 autoWidth = F,
+                                 scrollX = T,
+                                 dom = 'l<"sep">frtip',
+                                 language = list(
+                                   zeroRecords = "No data to display")),
+                  selection = "none",
+                  escape = FALSE)
+  }, server = F)
+  
+  # Observe button clicks
+  observeEvent(input$select_ode_data, {
+    selected_index <- as.numeric(sub("select_ode_", "", input$select_ode_data))
+    current_indices <- selected_ode_indices()
+    
+    # Toggle the selection state
+    if (selected_index %in% current_indices) {
+      selected_ode_indices(setdiff(current_indices, selected_index))
+      
+      # Update button label and class to "Selected"
+      runjs(paste0("$('#select_ode_", selected_index, "').text('Select');"))
+      runjs(paste0("$('#select_ode_", selected_index, "').removeClass('btn-success').addClass('btn-primary');"))
+    } else {
+      if (length(current_indices) < max_ode_selection) {
+        selected_ode_indices(c(current_indices, selected_index))
+        
+        # Update button label and class to "Selected"
+        runjs(paste0("$('#select_ode_", selected_index, "').text('Selected');"))
+        runjs(paste0("$('#select_ode_", selected_index, "').removeClass('btn-primary').addClass('btn-success');"))
+      } else {
+        showNotification("You can only select max. 1 Paper", type = "warning")
+      }
+    }
+    # condition to disable/enable the submit button
+    if (length(selected_ode_indices()) > 0)
+      enable("submitODEReq")
+    else
+      disable("submitODEReq")
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  observeEvent(input$resetODEReq, {
+    disable("submitODEReq")
+    output$odeResponseUI <- renderUI({
+      NULL
+    })
+    updateTreeInput("ode_tree", selected = character(0))
+    updateSelectInput(session, "de_schema_name", selected = "creep")
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  # Data Extraction
+  observeEvent(input$submitODEReq, {
+    
+    output$odeResponseUI <- renderUI({
+      NULL
+    })
+    
+    if (is.null(input$ode_tree)) {
+      showNotification("please select at least one entity", type = "warning")
+      return()
+    }
+    
+    doi <- ode_data_processed()[selected_ode_indices(), c("doi")]
+    
+    tryCatch({
+      lstODEObj <- list(doi=doi,
+                        output_format=input$ode_tree,
+                        de_schema_name=gsub(" ", "_", input$de_schema_name),
+                        de_model=input$de_model,
+                        de_source_format = input$de_source_format
+                        )
+      
+      jsonODEObj <- jsonlite::toJSON(lstODEObj, auto_unbox = T)
+      resp <- httr::POST(lstRESTRoutes$POST_ODE,
+                         body = list(reqObj = jsonODEObj),
+                         encode = "json")
+    }, warning = function(w) {
+      showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+                       type = "warning",
+                       duration = 7)
+      removeModal()
+      output$odeResponseUI <- renderUI({
+        NULL
+      })
+    }, error = function(e) {
+      showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$odeResponseUI <- renderUI({
+        NULL
+      })
+    })
+    if (!exists("resp")) {
+      showNotification(paste("The request couldn't be processed due to missing service REST endpoint"),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$odeResponseUI <- renderUI({
+        NULL
+      })
+    } else if (!resp$status_code == 200) {
+      showNotification(paste("The request couldn't be processed due to following error:",
+                             httr::content(resp, type="application/json"), ". Please contact administrator"),
+                       type = "error",
+                       duration = 7)
+      removeModal()
+      output$odeResponseUI <- renderUI({
+        NULL
+      })
+    } else {
+      
+      content <- httr::content(resp)
+      resp <- content$response[[1]]
+      if (!is.null(resp)) {
+        is_json <- jsonlite::validate(resp)
+        if (is_json) {
+          json_data <- resp
+        }
+      } else {
+        json_data <- toJSON(list())
+      }
+
+      json_data <- jsonlite::prettify(json_data, 4)
+      
+      # Handle the output
+      output$odeResponseUI <- renderUI({
+        tagList(
+          h3("Extracted Data:", style = "color: #4CAF50;"),
+          
+          # Display JSON in a read-only Ace Editor
+          div(style = "max-width: 600px; width: 100%;",
+              aceEditor(
+                outputId = "ode_json_display",
+                mode = "json",
+                theme = "github",
+                value = json_data,
+                readOnly = TRUE,
+                height = "500px",
+                fontSize = 14
+              )
+          ),
+          
+          tags$div(style = "margin-bottom: 15px;"),
+          
+          # Copy Button with Clipboard Support
+          rclipButton("copy_ode_json", "Copy JSON", json_data, icon = icon("copy"), class = "btn-primary")
+        )
+      })
+    }
+    disable("submitODEReq")
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+  
+  # Update de_schema_names when tabsetpanel is selected
+  observeEvent(input$extraction, {
+    if (input$extraction == "ode") {
+      output$odeResponseUI <- renderUI({
+        NULL
+      })
+      # tryCatch({
+      #   resp <- httr::GET(lstRESTRoutes$GET_DE_SCHEMA_NAMES)
+      # }, warning = function(w) {
+      #   showNotification(paste("The following warning occurred while establishing a connection to the server:", w),
+      #                    type = "warning",
+      #                    duration = 7)
+      #   removeModal()
+      # }, error = function(e) {
+      #   showNotification(paste("The following error occurred while establishing a connection to the server:", e),
+      #                    type = "error",
+      #                    duration = 7)
+      #   removeModal()
+      # })
+      # if (exists("resp")) {
+      #   if (resp$status_code != 200) {
+      #     showNotification("The schema names couldn't be retrieved",
+      #                      duration = 7,
+      #                      action = a(href = "javascript:location.reload();", "Reload page"))
+      #     return()
+      #   } else {
+      #     schema_names_list <- httr::content(resp)
+      #     de_schema_names(unlist(schema_names_list))
+      #   }
+      # }
+    }
+    vecSchemaNames <- sub("\\.[^.]+$", "", list.files(Sys.getenv("ODE_TREE_PATH"), pattern = ".json"))
+    vecSchemaNames <- gsub("_", " ", vecSchemaNames)
+    de_schema_names(vecSchemaNames)
+    updateSelectInput(session, "de_schema_name", choices = de_schema_names(), selected = "creep")
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  # Observe changes in de_schema and update treeInput
+  observe({
+    req(input$de_schema_name, input$extraction == "ode")
+    tree <- read_json(file.path(Sys.getenv("ODE_TREE_PATH"), paste0(gsub(" ", "_", input$de_schema_name), ".json")))
+    output$de_display_tree <- renderUI({
+      treeInput(
+        inputId = "ode_tree",
+        label = "Select entities to be extracted:",
+        choices = tree,
+        returnValue = "all",
+        closeDepth = 0
+      )
+    })
+  })
+  
+  # Add a new element dynamically
+  observeEvent(input$addDESchemaElement, {
+    parent_id <- paste0("element_", input$addDESchemaElement)
+    de_schema_element_counter(c(de_schema_element_counter(), input$addDESchemaElement))
+    
+    # Store initial input values
+    de_schema_element_data[[parent_id]] <- list(name = "", desc = "", array = FALSE, children = list())
+    
+    # Insert UI dynamically
+    insertUI(
+      selector = "#DESchemaContainer",
+      where = "beforeEnd",
+      ui = div(
+        id = parent_id,
+        class = "dynamic-element",
+        style = "border: 1px solid black; padding: 10px; margin: 5px;",
+        actionButton(paste0(parent_id, "_remove"),
+                     "Remove",
+                     onclick = paste0("Shiny.setInputValue('removeDESchemaElement', '", parent_id, "', {priority: 'event'})"),
+                     style = "background-color: red; color: white; border-radius: 5px; padding: 2px 6px; font-size: 12px; position: absolute; right: 30px;"),
+        textInput(paste0(parent_id, "_name"), 
+                  "Name*",
+                  value = isolate(de_schema_element_data[[parent_id]]$name),
+                  placeholder = "provide name of this entity"),
+        textInput(paste0(parent_id, "_desc"), 
+                  "Description*", 
+                  value = isolate(de_schema_element_data[[parent_id]]$desc),
+                  width = "150%",
+                  placeholder = "provide description about this entity"),
+        prettyCheckbox(paste0(parent_id, "_array"),
+                       "Is array?",
+                       value = FALSE,
+                       icon = icon("check", verify_fa = FALSE),
+                       animation = "smooth"),
+        actionButton(paste0(parent_id, "_add_child"), 
+                     "Add Property")
+      )
+    )
+    
+    # Observe user input and update reactiveValues
+    observeEvent(input[[paste0(parent_id, "_name")]], {
+      if (!is.null(de_schema_element_data[[parent_id]])) {
+        de_schema_element_data[[parent_id]]$name <- input[[paste0(parent_id, "_name")]]
+      }
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    
+    # Observe user input and update reactiveValues
+    observeEvent(input[[paste0(parent_id, "_desc")]], {
+      if (!is.null(de_schema_element_data[[parent_id]])) {
+        de_schema_element_data[[parent_id]]$desc <- input[[paste0(parent_id, "_desc")]]
+      }
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    
+    # Observe user input and update reactiveValues
+    observeEvent(input[[paste0(parent_id, "_array")]], {
+      if (!is.null(de_schema_element_data[[parent_id]])) {
+        de_schema_element_data[[parent_id]]$array <- input[[paste0(parent_id, "_array")]]
+      }
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    
+    # Add child element dynamically when "Add Child" is clicked
+    observeEvent(input[[paste0(parent_id, "_add_child")]], {
+      
+      #parent_child_id <- input$addDESchemaElementChild
+      #parent_child <- unlist(strsplit(parent_child_id, "_", fixed = TRUE))
+      #parent_id <- paste(parent_child[1:2], collapse = "_")
+      #child_id <- paste(parent_child[3:4], collapse = "_")
+      #child_number <- as.numeric(parent_child[4])
+      
+      child_number <- length(de_schema_element_data[[parent_id]]$children) + 1
+      child_id <- paste0(parent_id, "_child_", child_number)
+      
+      #req(input[[paste0(parent_id, "_add_child")]])
+      
+      # Initialize reactiveValues for the new child element
+      de_schema_element_data[[parent_id]]$children[[child_number]] <- list(name = "", desc = "", type = "", array = FALSE, enum_values = "")
+      
+      # Insert child UI dynamically under the parent element
+      insertUI(
+        selector = paste0("#", parent_id),
+        where = "beforeEnd",
+        ui = div(
+          id = child_id,
+          class = "dynamic-element",
+          style = "border: 1px solid gray; background-color: #f8f9fa; padding: 10px; margin: 5px; margin-left: 20px;",
+          actionButton(paste0(child_id, "_remove"),
+                       "Remove",
+                       onclick = paste0("Shiny.setInputValue('removeDESchemaElementChild', '", child_id, "', {priority: 'event'})"),
+                       style = "background-color: red; color: white; border-radius: 5px; padding: 2px 6px; font-size: 12px; position: absolute; right: 50px;"),
+          radioButtons(paste0(child_id, "_type"), 
+                       "Property Type", 
+                       choices = c("OpenAttribute", "Quantity", "Enumerate", "BaseQuantity"), 
+                       selected = "OpenAttribute"),
+          prettyCheckbox(paste0(child_id, "_array"),
+                         "Is array?",
+                         value = FALSE,
+                         icon = icon("check", verify_fa = FALSE),
+                         animation = "smooth"),
+          conditionalPanel(condition = paste0("input.", child_id, "_type", " != 'BaseQuantity'"),
+                           textInput(paste0(child_id, "_name"),
+                                     "Name*",
+                                     placeholder = "Provide name of this property")),
+          conditionalPanel(condition = paste0("input.", child_id, "_type", " != 'BaseQuantity'"),
+                           textInput(paste0(child_id, "_desc"),
+                                     "Description*",
+                                     placeholder = "Provide description for this property",
+                                     width = "150%")),
+          conditionalPanel(condition = paste0("input.", child_id, "_type", " == 'Enumerate'"),
+                           textInput(paste0(child_id, "_enum_values"),
+                                     "Enumerate Values*",
+                                     width = "150%",
+                                     placeholder = "provide predefined values seperated by comma, e.g., organic,inorganic"))
+        )
+      )
+      
+      observeEvent(input[[paste0(child_id, "_name")]], {
+        if (!is.null(de_schema_element_data[[parent_id]]) && 
+            !is.null(de_schema_element_data[[parent_id]]$children[[child_number]]$name)) {
+          de_schema_element_data[[parent_id]]$children[[child_number]]$name <- input[[paste0(child_id, "_name")]]
+        }
+      }, ignoreInit = TRUE, ignoreNULL = TRUE)
+      
+      observeEvent(input[[paste0(child_id, "_desc")]], {
+        if (!is.null(de_schema_element_data[[parent_id]]) && 
+            !is.null(de_schema_element_data[[parent_id]]$children[[child_number]]$desc)) {
+          de_schema_element_data[[parent_id]]$children[[child_number]]$desc <- input[[paste0(child_id, "_desc")]]
+        }
+      }, ignoreInit = TRUE, ignoreNULL = TRUE)
+      
+      observeEvent(input[[paste0(child_id, "_type")]], {
+        if (!is.null(de_schema_element_data[[parent_id]]) && 
+            !is.null(de_schema_element_data[[parent_id]]$children[[child_number]]$type) &&
+            de_schema_element_data[[parent_id]]$children[[child_number]]$type != "Removed") {
+          de_schema_element_data[[parent_id]]$children[[child_number]]$type <- input[[paste0(child_id, "_type")]]
+          if (!de_schema_element_data[[parent_id]]$children[[child_number]]$type == "Enumerate") {
+            de_schema_element_data[[parent_id]]$children[[child_number]]$enum_values <- "" 
+          }
+        }
+      }, ignoreInit = TRUE, ignoreNULL = TRUE)
+      
+      observeEvent(input[[paste0(child_id, "_enum_values")]], {
+        if (!is.null(de_schema_element_data[[parent_id]]) && 
+            !is.null(de_schema_element_data[[parent_id]]$children[[child_number]]$enum_values)) {
+          de_schema_element_data[[parent_id]]$children[[child_number]]$enum_values <- input[[paste0(child_id, "_enum_values")]]
+        }
+      }, ignoreInit = TRUE, ignoreNULL = TRUE)
+      
+      observeEvent(input[[paste0(child_id, "_array")]], {
+        if (!is.null(de_schema_element_data[[parent_id]]) && 
+            !is.null(de_schema_element_data[[parent_id]]$children[[child_number]]$desc)) {
+          de_schema_element_data[[parent_id]]$children[[child_number]]$array <- input[[paste0(child_id, "_array")]]
+        }
+      }, ignoreInit = TRUE, ignoreNULL = TRUE)
+      
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    
+  }, ignoreNULL = TRUE)
+  
+  
+  # Remove an element dynamically
+  observeEvent(input$removeDESchemaElement, {
+    
+    # Remove UI element
+    removeUI(selector = paste0("#", input$removeDESchemaElement))
+    
+    # Remove from storage
+    de_schema_element_data[[input$removeDESchemaElement]] <- NULL
+    
+    # Remove the deleted element from vector
+    removeCounter <- as.numeric(gsub(pattern = "\\D", "", input$removeDESchemaElement))
+    de_schema_element_counter(setdiff(de_schema_element_counter(),removeCounter))
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+  # Remove a child dynamically
+  observeEvent(input$removeDESchemaElementChild, {
+    
+    #child_index <- as.numeric(gsub(".*_(\\d+)_.*", "\\1", input[[paste0(child_id, "_name")]]))
+    
+    # Remove UI element
+    removeUI(selector = paste0("#", input$removeDESchemaElementChild))
+    
+    parent_child <- unlist(strsplit(input$removeDESchemaElementChild, "_", fixed = TRUE))
+    parent <- paste(parent_child[1:2], collapse = "_")
+    child <- paste(parent_child[3:4], collapse = "_")
+    child_number <- as.numeric(parent_child[4])
+    
+    # Remove from storage
+    #de_schema_element_data[[parent]]$children[[child_number]]$name <- NULL
+    #de_schema_element_data[[parent]]$children[[child_number]]$desc <- NULL
+    de_schema_element_data[[parent]]$children[[child_number]]$type <- "Removed"
+    #de_schema_element_data[[parent]]$children[[child_number]]$enum_values <- NULL
+    
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  # Save Data Extraction Schema
+  observeEvent(input$saveDESchema, {
+    
+    if (is.null(input$deSchemaName)) {
+      showNotification("The schema name must be defined", type = "error")
+      return()
+    }
+    
+    if (is.null(input$deSchemaDesc)) {
+      showNotification("The schema description must be defined for adaptive prompt creation", type = "error")
+      return()
+    }
+    
+    schema_list <- reactiveValuesToList(de_schema_element_data)
+    
+    
+    rdf_tree <- create_rdf_tree(schema_list)
+    
+    if (!length(rdf_tree$experiment)) {
+      showNotification(paste("Please add at least one element."),
+                       type = "error",
+                       duration = 7)
+      return()
+    }
+    
+    for (elem_id in names(schema_list)) {
+      children <- schema_list[[elem_id]]$children
+      
+      # Filter out the removed element
+      if (is.null(children)) {
+        schema_list[[elem_id]] <- NULL
+        next
+      }
+      
+      # Filter out removed children (type == "Removed")
+      valid_children <- Filter(function(child) child$type != "Removed", children)
+      
+      # Update the list (removing the removed ones)
+      schema_list[[elem_id]]$children <- valid_children
+      
+      if (!length(valid_children)) {
+        showNotification(
+          paste0("An element must have at least one property."),
+          type = "error",
+          duration = 7
+        )
+        return()
+      }
+    }
+    
+    
+    #valid_children <- Filter(function(child) child$type != "Removed", children)
+    #if (length(valid_children) == 0) {
+    #  showNotification(
+    #    paste0("Element '", elem_id, "' must have at least one property."),
+    #    type = "error",
+    #    duration = 7
+    #  )
+    #  return()
+    #}
+    
+    schema_list$description <- input$deSchemaDesc
+    schema_list$name <- input$deSchemaName
+    schema_json <- toJSON(schema_list, auto_unbox = T)
+    
+    # Save the json
+    file_name <- gsub(" ", "_", input$deSchemaName)
+    file_name_with_ext <- paste0(file_name)
+    file_path <- file.path(Sys.getenv("ODE_TREE_PATH"), file_name_with_ext)
+    if (file.exists(file_path)) {
+      showNotification(paste("The schema name already exists. Please select another schema name."),
+                       type = "error",
+                       duration = 7)
+      return()
+    }
+    tryCatch({
+      write(schema_json, file = file_path)
+      showNotification(paste("The schema has been successfully saved"),
+                       type = "message",
+                       duration = 7)
+    }, error = function(e) {
+      showNotification(paste("The schema couldn't be saved due to following error: ", e),
+                       type = "error",
+                       duration = 7)
+    })
+    
+    
+    # Transform the rdf_tree into the desired data.frame
+    dt_tree <- transform_rdf_to_df(rdf_tree$experiment)
+    
+    # Create the data frame
+    tree <- create_tree(dt_tree)
+
+    # Convert tree into json
+    rdf_tree_json <- toJSON(tree, auto_unbox = T)
+    
+    # Save the json
+    file_name <- gsub(" ", "_", input$deSchemaName)
+    file_name_with_ext <- paste0(file_name, ".json")
+    file_path <- file.path(Sys.getenv("ODE_TREE_PATH"), file_name_with_ext)
+    if (file.exists(file_path)) {
+      showNotification(paste("The selection tree name already exists. Please select another selection tree"),
+                       type = "error",
+                       duration = 7)
+      return()
+    }
+    tryCatch({
+      write(rdf_tree_json, file = file_path)
+      showNotification(paste("The selection tree has been successfully saved"),
+                       type = "message",
+                       duration = 7)
+      removeUI(
+        selector = "#DESchemaContainer > *",
+        immediate = TRUE,
+        multiple = TRUE
+      )
+      updateTextInput(session, "deSchemaName", value = "")
+      updateTextAreaInput(session, "deSchemaDesc", value = "")
+      de_schema_element_data <<- reactiveValues()
+    }, error = function(e) {
+      showNotification(paste("The selection tree couldn't be saved due to following error: ", e),
+                       type = "error",
+                       duration = 7)
+    })
+    
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
   
   #################################User Profile################################
   
